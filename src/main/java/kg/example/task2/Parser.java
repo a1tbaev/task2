@@ -68,7 +68,7 @@ public class Parser {
             String formattedDateTime = now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
 
             String type = data.getType();
-            String fileName = type + "-" + formattedDateTime + ".json";
+            String fileName = type + "-" + formattedDateTime + ".log";
 
             Path filePath = Paths.get(desktopPath + fileName);
 

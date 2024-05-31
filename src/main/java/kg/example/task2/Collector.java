@@ -5,46 +5,59 @@ import java.nio.file.*;
 import java.util.*;
 
 public class Collector {
-    private static final int RECORDS_PER_FILE = 4;
+    private static final int RECORDS_PER_FILE = 100;
     private static final String LOG_FILES_DIR = System.getProperty("user.home") + "/Desktop/parser/";
     private static final String STATE_FILE = System.getProperty("user.home") + "/Desktop/parser/state.txt";
 
     public static void main(String[] args) throws IOException {
         State state = readState();
+
         int lastProcessedFileIndex = state.lastProcessedFileIndex;
         int lastProcessedRecordIndex = state.lastProcessedRecordIndex;
+        int currentBatchFileIndex = state.currentBatchFileIndex;
 
         Path logFilesDir = Paths.get(LOG_FILES_DIR);
         if (Files.exists(logFilesDir)) {
             List<Path> logFiles = Files.list(logFilesDir)
-                    .filter(path -> path.toString().endsWith(".json") && !path.toString().matches(".*-\\d{4}\\.log"))
+                    .filter(path -> path.toString().endsWith(".log") && !path.toString().matches(".*merged-\\d{4}\\.log"))
                     .sorted()
                     .toList();
 
             List<String> currentBatchRecords = new ArrayList<>();
-            int currentBatchFileIndex = state.currentBatchFileIndex;
+
+            if (lastProcessedRecordIndex > 0) {
+                Path lastProcessedFilePath = logFiles.get(lastProcessedFileIndex);
+                List<String> remainingRecords = readRecordsFromFile(lastProcessedFilePath, lastProcessedRecordIndex);
+                currentBatchRecords.addAll(remainingRecords);
+                lastProcessedRecordIndex = 0;
+
+                if (currentBatchRecords.size() >= RECORDS_PER_FILE) {
+                    saveRecordsToFile(currentBatchRecords.subList(0, RECORDS_PER_FILE), currentBatchFileIndex++);
+                    currentBatchRecords = new ArrayList<>(currentBatchRecords.subList(RECORDS_PER_FILE, currentBatchRecords.size()));
+                }
+            }
 
             for (int i = lastProcessedFileIndex; i < logFiles.size(); i++) {
                 List<String> records = readRecordsFromFile(logFiles.get(i), lastProcessedRecordIndex);
-                lastProcessedRecordIndex = 0;
+                currentBatchRecords.addAll(records);
 
-                for (String record : records) {
-                    currentBatchRecords.add(record);
-                    if (currentBatchRecords.size() == RECORDS_PER_FILE) {
-                        saveRecordsToFile(currentBatchRecords, currentBatchFileIndex++);
-                        currentBatchRecords.clear();
-                    }
+                while (currentBatchRecords.size() >= RECORDS_PER_FILE) {
+                    saveRecordsToFile(currentBatchRecords.subList(0, RECORDS_PER_FILE), currentBatchFileIndex++);
+                    currentBatchRecords = new ArrayList<>(currentBatchRecords.subList(RECORDS_PER_FILE, currentBatchRecords.size()));
                 }
-                lastProcessedFileIndex = i + 1;
-                updateState(lastProcessedFileIndex, lastProcessedRecordIndex, currentBatchFileIndex);
-            }
 
+                lastProcessedFileIndex = i;
+                lastProcessedRecordIndex = 0;
+            }
 
             if (!currentBatchRecords.isEmpty()) {
-                saveRecordsToFile(currentBatchRecords, currentBatchFileIndex);
+                saveRecordsToFile(currentBatchRecords, currentBatchFileIndex++);
+                lastProcessedRecordIndex = currentBatchRecords.size();
             }
+
+            updateState(lastProcessedFileIndex, lastProcessedRecordIndex, currentBatchFileIndex);
         } else {
-            System.out.println("Log files directory does not exist.");
+            System.err.println("File not found!!");
         }
     }
 
@@ -63,8 +76,7 @@ public class Collector {
     }
 
     private static void saveRecordsToFile(List<String> records, int fileIndex) {
-        String baseFileName = "merged";
-        String fileName = String.format("%s-%04d.log", baseFileName, fileIndex);
+        String fileName = String.format("merged-%04d.log", fileIndex);
         Path outputPath = Paths.get(LOG_FILES_DIR, fileName);
         try (PrintWriter writer = new PrintWriter(new FileWriter(outputPath.toFile(), true))) {
             for (String record : records) {
@@ -75,11 +87,11 @@ public class Collector {
         }
     }
 
-    private static void updateState(int fileIndex, int recordIndex, int batchFileIndex) {
+    private static void updateState(int lastProcessedFileIndex, int lastProcessedRecordIndex, int currentBatchFileIndex) {
         try (PrintWriter stateWriter = new PrintWriter(new FileWriter(STATE_FILE))) {
-            stateWriter.println(fileIndex);
-            stateWriter.println(recordIndex);
-            stateWriter.println(batchFileIndex);
+            stateWriter.println(lastProcessedFileIndex);
+            stateWriter.println(lastProcessedRecordIndex);
+            stateWriter.println(currentBatchFileIndex);
         } catch (IOException e) {
             e.printStackTrace();
         }
